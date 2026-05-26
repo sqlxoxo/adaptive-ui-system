@@ -44,10 +44,7 @@ def analyze_user_level(metrics: dict) -> dict:
     }
 
 def get_ui_configuration(level: str, score: int) -> dict:
-    """
-    Returns dynamic client-side widget visibility and size configurations 
-    based on computed user experience levels.
-    """
+
     if level == "Novice":
         return {
             "level": "Novice",
