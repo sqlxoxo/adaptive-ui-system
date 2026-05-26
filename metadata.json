@@ -1,0 +1,6 @@
+{
+  "name": "Smart Task Management System",
+  "description": "Task management system with an intelligent adaptive UI/UX based on real-time user telemetry analysis.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

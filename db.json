@@ -1,0 +1,136 @@
+{
+  "users": [
+    {
+      "id": "user-demo",
+      "name": "Станіслав Буберенко",
+      "level": "Expert",
+      "joinedAt": "2026-05-22T10:00:00.000Z"
+    }
+  ],
+  "tasks": [],
+  "telemetry_logs": [
+    {
+      "id": "log-1779642909036",
+      "userId": "user-demo",
+      "timestamp": "2026-05-24T17:15:09.036Z",
+      "metrics": {
+        "errorsCount": 0,
+        "hoverTime": 10,
+        "firstTaskDuration": 0,
+        "shortcutCount": 0,
+        "actionsCount": 1,
+        "totalTime": 13
+      }
+    },
+    {
+      "id": "log-1779642912030",
+      "userId": "user-demo",
+      "timestamp": "2026-05-24T17:15:12.030Z",
+      "metrics": {
+        "errorsCount": 0,
+        "hoverTime": 1,
+        "firstTaskDuration": 0,
+        "shortcutCount": 0,
+        "actionsCount": 1,
+        "totalTime": 2
+      }
+    },
+    {
+      "id": "log-1779642914696",
+      "userId": "user-demo",
+      "timestamp": "2026-05-24T17:15:14.696Z",
+      "metrics": {
+        "errorsCount": 0,
+        "hoverTime": 0,
+        "firstTaskDuration": 0,
+        "shortcutCount": 0,
+        "actionsCount": 1,
+        "totalTime": 2
+      }
+    },
+    {
+      "id": "log-1779642920383",
+      "userId": "user-demo",
+      "timestamp": "2026-05-24T17:15:20.383Z",
+      "metrics": {
+        "errorsCount": 0,
+        "hoverTime": 4,
+        "firstTaskDuration": 0,
+        "shortcutCount": 0,
+        "actionsCount": 0,
+        "totalTime": 5
+      }
+    },
+    {
+      "id": "log-1779642920385",
+      "userId": "user-demo",
+      "timestamp": "2026-05-24T17:15:20.385Z",
+      "metrics": {
+        "errorsCount": 0,
+        "hoverTime": 4,
+        "firstTaskDuration": 0,
+        "shortcutCount": 0,
+        "actionsCount": 0,
+        "totalTime": 5
+      }
+    }
+  ],
+  "metrics_history": [
+    {
+      "time": "12:00:00",
+      "score": 15,
+      "errors": 2,
+      "shortcuts": 0,
+      "hoverTime": 12
+    },
+    {
+      "time": "12:05:00",
+      "score": 30,
+      "errors": 1,
+      "shortcuts": 1,
+      "hoverTime": 8
+    },
+    {
+      "time": "12:10:00",
+      "score": 45,
+      "errors": 0,
+      "shortcuts": 3,
+      "hoverTime": 4
+    },
+    {
+      "time": "20:15:09",
+      "score": 50,
+      "errors": 0,
+      "shortcuts": 0,
+      "hoverTime": 10
+    },
+    {
+      "time": "20:15:12",
+      "score": 60,
+      "errors": 0,
+      "shortcuts": 0,
+      "hoverTime": 1
+    },
+    {
+      "time": "20:15:14",
+      "score": 50,
+      "errors": 0,
+      "shortcuts": 0,
+      "hoverTime": 0
+    },
+    {
+      "time": "20:15:20",
+      "score": 60,
+      "errors": 0,
+      "shortcuts": 0,
+      "hoverTime": 4
+    },
+    {
+      "time": "20:15:20",
+      "score": 60,
+      "errors": 0,
+      "shortcuts": 0,
+      "hoverTime": 4
+    }
+  ]
+}
