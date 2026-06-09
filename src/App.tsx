@@ -115,7 +115,7 @@ export default function App() {
       ...(options.headers || {}),
       ...(token ? { "Authorization": `Bearer ${token}` } : {})
     };
-    
+    console.log("Спроба запиту на URL:", url);    
     const res = await fetch(url, { ...options, headers });
     if (res.status === 401 || res.status === 403) {
       handleLogout();
