@@ -10,6 +10,7 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
   const [username, setUsername] = useState("");
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState(""); // Новий стан
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -27,6 +28,12 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
 
     if (!isLogin && !name.trim()) {
       setError("Будь ласка, введіть ваше ім'я!");
+      return;
+    }
+
+    // Перевірка співпадіння паролів при реєстрації
+    if (!isLogin && password !== confirmPassword) {
+      setError("Паролі не співпадають!");
       return;
     }
 
@@ -60,12 +67,24 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
         setIsLogin(true);
         setName("");
         setPassword("");
+        setConfirmPassword(""); // Очистити підтвердження
       }
     } catch (err: any) {
       setError(err.message || "Помилка зв'язку з сервером.");
     } finally {
       setLoading(false);
     }
+  };
+
+  // Скидання помилки при зміні полів (опціонально)
+  const handlePasswordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setPassword(e.target.value);
+    if (error === "Паролі не співпадають!") setError("");
+  };
+
+  const handleConfirmPasswordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setConfirmPassword(e.target.value);
+    if (error === "Паролі не співпадають!") setError("");
   };
 
   return (
@@ -100,6 +119,7 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
                 setIsLogin(true);
                 setError("");
                 setSuccess("");
+                setConfirmPassword("");
               }}
               className={`flex-1 py-2.5 text-sm font-semibold rounded-xl transition-all duration-300 cursor-pointer ${
                 isLogin
@@ -114,6 +134,7 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
                 setIsLogin(false);
                 setError("");
                 setSuccess("");
+                setConfirmPassword("");
               }}
               className={`flex-1 py-2.5 text-sm font-semibold rounded-xl transition-all duration-300 cursor-pointer ${
                 !isLogin
@@ -176,9 +197,9 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
                 <input
                   type={showPassword ? "text" : "password"}
                   required
-                  placeholder="••••••••"
+                  placeholder="Введіть пароль"
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={handlePasswordChange}
                   className="w-full pl-11 pr-11 py-3 bg-slate-100/50 dark:bg-slate-950/40 border border-slate-200 dark:border-slate-800 rounded-2xl text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-600 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 dark:focus:border-indigo-400 transition-all font-sans"
                 />
                 <button
@@ -190,6 +211,26 @@ export default function Auth({ onAuthSuccess }: AuthProps) {
                 </button>
               </div>
             </div>
+
+            {/* Confirm Password Input (Only on Register) */}
+            {!isLogin && (
+              <div className="space-y-1.5 animate-fadeIn">
+                <label className="text-xs font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider block">
+                  Підтвердіть пароль
+                </label>
+                <div className="relative">
+                  <Key className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4.5 h-4.5 text-slate-400 dark:text-slate-500" />
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    required
+                    placeholder="Підтвердіть пароль"
+                    value={confirmPassword}
+                    onChange={handleConfirmPasswordChange}
+                    className="w-full pl-11 pr-11 py-3 bg-slate-100/50 dark:bg-slate-950/40 border border-slate-200 dark:border-slate-800 rounded-2xl text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-600 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 dark:focus:border-indigo-400 transition-all font-sans"
+                  />
+                </div>
+              </div>
+            )}
 
             {/* Notifications Alert Container */}
             {error && (
