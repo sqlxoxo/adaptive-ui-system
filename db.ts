@@ -36,7 +36,8 @@ async function initDB(db: Database) {
       first_task_duration REAL DEFAULT 0.0,
       shortcut_count INTEGER DEFAULT 0,
       actions_count INTEGER DEFAULT 0,
-      total_time REAL DEFAULT 0.0
+      total_time REAL DEFAULT 0.0,
+      custom_columns TEXT DEFAULT '[{"id":"todo","name":"To Do"},{"id":"inprogress","name":"In Progress"},{"id":"done","name":"Done"}]'
     );
 
     CREATE TABLE IF NOT EXISTS tasks (
@@ -75,6 +76,12 @@ async function initDB(db: Database) {
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
   `);
+
+  try {
+    await db.exec(`ALTER TABLE users ADD COLUMN custom_columns TEXT DEFAULT '[{"id":"todo","name":"To Do"},{"id":"inprogress","name":"In Progress"},{"id":"done","name":"Done"}]';`);
+  } catch (e) {
+    // Ignore if column already exists
+  }
 }
 
 export async function createDefaultTasksForUser(db: Database, userId: string) {

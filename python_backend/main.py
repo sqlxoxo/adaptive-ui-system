@@ -105,7 +105,7 @@ def create_task(payload: TaskCreate, db=Depends(get_db)):
     return new_task
 
 @app.post("/api/telemetry")
-def submit_telemetry(payload: TelemetryPayload, db=Depends(get_db))
+def submit_telemetry(payload: TelemetryPayload, db=Depends(get_db)):
     # Sync core state
     live_session_metrics["errors_count"] = payload.errorsCount
     live_session_metrics["hover_time"] = payload.hoverTime
@@ -115,7 +115,10 @@ def submit_telemetry(payload: TelemetryPayload, db=Depends(get_db))
     live_session_metrics["actions_count"] = payload.actionsCount
     live_session_metrics["total_time"] = payload.totalTime
     
-    analysis = analyze_user_level(live_session_metrics)
+    # Sync level back to User profile
+    user_model = db.query(User).filter(User.id == "user-demo").first()
+    current_level = user_model.level if user_model else "Novice"
+    analysis = analyze_user_level(live_session_metrics, current_level)
     
     # Save log row to SQL database
     new_log = TelemetryLog(
@@ -129,8 +132,6 @@ def submit_telemetry(payload: TelemetryPayload, db=Depends(get_db))
     )
     db.add(new_log)
     
-    # Sync level back to User profile
-    user_model = db.query(User).filter(User.id == "user-demo").first()
     if user_model:
         user_model.level = analysis["level"]
         
@@ -143,8 +144,10 @@ def submit_telemetry(payload: TelemetryPayload, db=Depends(get_db))
     }
 
 @app.get("/api/ui-config")
-def get_ui_config():
-    analysis = analyze_user_level(live_session_metrics)
+def get_ui_config(db=Depends(get_db)):
+    user_model = db.query(User).filter(User.id == "user-demo").first()
+    current_level = user_model.level if user_model else "Novice"
+    analysis = analyze_user_level(live_session_metrics, current_level)
     config = get_ui_configuration(analysis["level"], analysis["score"])
     return config
 

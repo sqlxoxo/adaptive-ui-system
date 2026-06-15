@@ -9,7 +9,7 @@ import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import { getDB, createDefaultTasksForUser } from "./db";
+import { getDB } from "./db";
 
 dotenv.config();
 
@@ -57,7 +57,11 @@ function calculateSkillScore(telemetry: {
   actionsCount: number;
   totalTime: number;
 }, currentLevel: string): { score: number; level: "Novice" | "Expert" } {
-  let score = 50;
+  // Novices start at a lower score, Experts start higher
+  let score = currentLevel === "Expert" ? 60 : 15;
+
+  // Every action adds points to allow progression in novice mode
+  score += telemetry.actionsCount * 2;
 
   // Shortcuts are a strong signal of expert level
   score += telemetry.shortcutCount * 12;
@@ -136,9 +140,6 @@ app.post("/api/auth/register", async (req: Request, res: Response) => {
        VALUES (?, ?, ?, ?, ?, ?)`,
       [userId, username.trim().toLowerCase(), name.trim(), passwordHash, "Novice", joinedAt]
     );
-
-    // Create 3 default tasks for new user to showcase onboarding
-    await createDefaultTasksForUser(db, userId);
 
     res.status(201).json({ success: true, message: "Реєстрація успішна!" });
   } catch (err) {
@@ -256,7 +257,7 @@ app.post("/api/tasks", authenticateToken, async (req: AuthRequest, res: Response
     const userTasks = await db.all("SELECT id FROM tasks WHERE user_id = ?", [userId]);
     
     let firstTaskDuration = user.first_task_duration;
-    if (userTasks.length === 3 && firstTaskDuration === 0) {
+    if (userTasks.length === 0 && firstTaskDuration === 0) {
       const elapsed = Math.round(user.total_time || 12);
       firstTaskDuration = elapsed;
       await db.run("UPDATE users SET first_task_duration = ? WHERE id = ?", [firstTaskDuration, userId]);
@@ -375,6 +376,54 @@ app.delete("/api/tasks/:id", authenticateToken, async (req: AuthRequest, res: Re
   } catch (err) {
     console.error("Delete task error:", err);
     res.status(500).json({ error: "Помилка видалення задачі" });
+  }
+});
+
+// 4.1. GET Custom Columns
+app.get("/api/columns", authenticateToken, async (req: AuthRequest, res: Response) => {
+  const userId = req.user!.id;
+  try {
+    const db = await getDB();
+    const user = await db.get("SELECT custom_columns FROM users WHERE id = ?", [userId]);
+    if (!user) {
+      res.status(404).json({ error: "Користувача не знайдено" });
+      return;
+    }
+    const cols = JSON.parse(user.custom_columns || '[{"id":"todo","name":"To Do"},{"id":"inprogress","name":"In Progress"},{"id":"done","name":"Done"}]');
+    res.json(cols);
+  } catch (err) {
+    console.error("GET columns error:", err);
+    res.status(500).json({ error: "Помилка завантаження колонок" });
+  }
+});
+
+// 4.2. PUT Custom Columns (Save/Update columns list)
+app.put("/api/columns", authenticateToken, async (req: AuthRequest, res: Response) => {
+  const userId = req.user!.id;
+  const { columns } = req.body;
+
+  if (!Array.isArray(columns)) {
+    res.status(400).json({ error: "Некоректний формат колонок" });
+    return;
+  }
+
+  try {
+    const db = await getDB();
+    await db.run("UPDATE users SET custom_columns = ? WHERE id = ?", [JSON.stringify(columns), userId]);
+
+    // Move orphaned tasks to the first column if there are columns left
+    if (columns.length > 0) {
+      const colIds = columns.map(c => c.id);
+      const placeholders = colIds.map(() => "?").join(",");
+      await db.run(
+        `UPDATE tasks SET status = ? WHERE user_id = ? AND status NOT IN (${placeholders})`,
+        [colIds[0], userId, ...colIds]
+      );
+    }
+    res.json({ success: true, columns });
+  } catch (err) {
+    console.error("PUT columns error:", err);
+    res.status(500).json({ error: "Помилка збереження колонок" });
   }
 });
 

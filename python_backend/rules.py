@@ -1,6 +1,11 @@
-def analyze_user_level(metrics: dict) -> dict:
+def analyze_user_level(metrics: dict, current_level: str = "Novice") -> dict:
 
-    score = 50  # Starting neutral midpoint score
+    # Novices start at a lower score, Experts start higher
+    score = 60 if current_level == "Expert" else 15
+    
+    # Every action adds points to allow progression in novice mode
+    actions_count = metrics.get('actions_count', 0)
+    score += actions_count * 2
     
     # Increase score for using quick actions (hotkeys/shortcuts)
     shortcut_count = metrics.get('shortcut_count', 0)
@@ -25,7 +30,6 @@ def analyze_user_level(metrics: dict) -> dict:
         score += 15
         
     # Engagement and action density
-    actions_count = metrics.get('actions_count', 0)
     if actions_count > 25 and shortcut_count > 4:
         score += 10
         

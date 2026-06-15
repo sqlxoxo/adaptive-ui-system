@@ -27,7 +27,8 @@ import {
   PlusCircle,
   Play,
   Sun,
-  Moon
+  Moon,
+  Edit
 } from "lucide-react";
 import { Task, TelemetryMetrics, UIConfig } from "./types";
 import OnboardingGuide from "./components/OnboardingGuide";
@@ -62,6 +63,11 @@ export default function App() {
 
   // Live Tasks and configuration states
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [columns, setColumns] = useState<{ id: string; name: string }[]>([
+    { id: "todo", name: "To Do" },
+    { id: "inprogress", name: "In Progress" },
+    { id: "done", name: "Done" }
+  ]);
   const [uiConfig, setUiConfig] = useState<UIConfig>({
     level: "Novice",
     score: 15,
@@ -92,11 +98,15 @@ export default function App() {
   const [newTitle, setNewTitle] = useState("");
   const [newDescription, setNewDescription] = useState("");
   const [newPriority, setNewPriority] = useState<"low" | "medium" | "high">("medium");
-  const [newStatus, setNewStatus] = useState<"todo" | "inprogress" | "done">("todo");
+  const [newStatus, setNewStatus] = useState<string>("todo");
+  const [editingColumnId, setEditingColumnId] = useState<string | null>(null);
+  const [editingColumnName, setEditingColumnName] = useState<string>("");
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [syncStatus, setSyncStatus] = useState<"syncing" | "idle" | "error">("idle");
   const [activeTooltip, setActiveTooltip] = useState<string | null>(null);
   const [isTelemetryCollapsed, setIsTelemetryCollapsed] = useState<boolean>(false);
+  const [isChartCollapsed, setIsChartCollapsed] = useState<boolean>(false);
 
   // Filters for Expert UI
   const [searchQuery, setSearchQuery] = useState("");
@@ -107,6 +117,18 @@ export default function App() {
   const totalTimerRef = useRef<number>(0);
   const isDocCreatedYet = useRef<boolean>(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Stale closures refs
+  const tasksRef = useRef<Task[]>([]);
+  const columnsRef = useRef<{ id: string; name: string }[]>([]);
+
+  useEffect(() => {
+    tasksRef.current = tasks;
+  }, [tasks]);
+
+  useEffect(() => {
+    columnsRef.current = columns;
+  }, [columns]);
 
   // Custom authenticated fetch wrapper
   const authenticatedFetch = async (url: string, options: RequestInit = {}) => {
@@ -129,6 +151,11 @@ export default function App() {
     localStorage.removeItem("auth_token");
     setUser(null);
     setTasks([]);
+    setColumns([
+      { id: "todo", name: "To Do" },
+      { id: "inprogress", name: "In Progress" },
+      { id: "done", name: "Done" }
+    ]);
     setMetricsHistory([]);
     setTelemetry({
       errorsCount: 0,
@@ -174,6 +201,7 @@ export default function App() {
     if (!user) return;
 
     fetchTasks();
+    fetchColumns();
     fetchUIConfig();
     fetchHistory();
 
@@ -190,6 +218,12 @@ export default function App() {
       if (e.key.toLowerCase() === "n") {
         e.preventDefault();
         setTelemetry(prev => ({ ...prev, shortcutCount: prev.shortcutCount + 1 }));
+        setEditingTaskId(null);
+        setNewTitle("");
+        setNewDescription("");
+        setNewPriority("medium");
+        setNewStatus(columnsRef.current[0]?.id || "todo");
+        setValidationError(null);
         setIsModalOpen(true);
       } else if (e.key.toLowerCase() === "s") {
         e.preventDefault();
@@ -242,6 +276,19 @@ export default function App() {
       }
     } catch (err) {
       console.error("Failed to fetch tasks", err);
+    }
+  };
+
+  // Fetch columns from server
+  const fetchColumns = async () => {
+    try {
+      const res = await authenticatedFetch("/api/columns");
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        setColumns(data);
+      }
+    } catch (err) {
+      console.error("Failed to load columns", err);
     }
   };
 
@@ -332,7 +379,18 @@ export default function App() {
     }
   };
 
-  // Create task
+  // Start task editing
+  const startEditingTask = (task: Task) => {
+    setEditingTaskId(task.id);
+    setNewTitle(task.title);
+    setNewDescription(task.description || "");
+    setNewPriority(task.priority);
+    setNewStatus(task.status);
+    setValidationError(null);
+    setIsModalOpen(true);
+  };
+
+  // Save task (Create or Edit)
   const handleCreateTask = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTitle.trim()) {
@@ -363,8 +421,10 @@ export default function App() {
     setTelemetry(nextTelemetry);
 
     try {
-      const res = await authenticatedFetch("/api/tasks", {
-        method: "POST",
+      const url = editingTaskId ? `/api/tasks/${editingTaskId}` : "/api/tasks";
+      const method = editingTaskId ? "PUT" : "POST";
+      const res = await authenticatedFetch(url, {
+        method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title: newTitle,
@@ -378,6 +438,8 @@ export default function App() {
         setNewTitle("");
         setNewDescription("");
         setNewPriority("medium");
+        setNewStatus(columns[0]?.id || "todo");
+        setEditingTaskId(null);
         setIsModalOpen(false);
         fetchTasks();
         syncTelemetry(nextTelemetry);
@@ -388,7 +450,7 @@ export default function App() {
   };
 
   // Modify task status
-  const updateTaskStatus = async (id: string, newStatus: "todo" | "inprogress" | "done") => {
+  const updateTaskStatus = async (id: string, newStatus: string) => {
     const nextTelemetry = {
       ...telemetry,
       actionsCount: telemetry.actionsCount + 1
@@ -433,7 +495,7 @@ export default function App() {
 
   // Clear completed tasks
   const clearCompletedTasks = async () => {
-    const doneTasks = tasks.filter(t => t.status === "done");
+    const doneTasks = tasksRef.current.filter(t => t.status === "done");
     if (doneTasks.length === 0) return;
 
     const nextTelemetry = {
@@ -447,6 +509,79 @@ export default function App() {
     }
     fetchTasks();
     syncTelemetry(nextTelemetry);
+  };
+
+  // Column management actions
+  const handleAddColumn = async (name: string) => {
+    if (!name.trim()) return;
+    const newColId = "col_" + Date.now();
+    const updatedCols = [...columns, { id: newColId, name: name.trim() }];
+    
+    try {
+      const res = await authenticatedFetch("/api/columns", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ columns: updatedCols })
+      });
+      if (res.ok) {
+        setColumns(updatedCols);
+        setTelemetry(prev => ({ ...prev, actionsCount: prev.actionsCount + 1 }));
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const startEditingColumn = (colId: string, currentName: string) => {
+    setEditingColumnId(colId);
+    setEditingColumnName(currentName);
+  };
+
+  const saveColumnRename = async (colId: string) => {
+    if (!editingColumnName.trim()) {
+      setEditingColumnId(null);
+      return;
+    }
+    const updatedCols = columns.map(c => c.id === colId ? { ...c, name: editingColumnName.trim() } : c);
+    try {
+      const res = await authenticatedFetch("/api/columns", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ columns: updatedCols })
+      });
+      if (res.ok) {
+        setColumns(updatedCols);
+        setEditingColumnId(null);
+        setTelemetry(prev => ({ ...prev, actionsCount: prev.actionsCount + 1 }));
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleDeleteColumn = async (colId: string) => {
+    if (columns.length <= 1) {
+      alert("Не можна видалити останню колонку!");
+      return;
+    }
+    if (!window.confirm("Ви впевнені, що хочете видалити цю колонку? Усі задачі з неї буде переміщено до першої колонки.")) {
+      return;
+    }
+    const updatedCols = columns.filter(c => c.id !== colId);
+    try {
+      const res = await authenticatedFetch("/api/columns", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ columns: updatedCols })
+      });
+      if (res.ok) {
+        setColumns(updatedCols);
+        fetchTasks();
+        setTelemetry(prev => ({ ...prev, actionsCount: prev.actionsCount + 1 }));
+      }
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   // Custom simulation trigger
@@ -497,6 +632,9 @@ export default function App() {
   const todoTasks = filteredTasks.filter(t => t.status === "todo");
   const inProgressTasks = filteredTasks.filter(t => t.status === "inprogress");
   const doneTasks = filteredTasks.filter(t => t.status === "done");
+
+  const isChartCollapsedState = !uiConfig.showDetailedAnalytics || isChartCollapsed;
+  const isSidebarCollapsed = isTelemetryCollapsed && isChartCollapsedState;
 
   if (authLoading) {
     return (
@@ -602,7 +740,7 @@ export default function App() {
       </header>
 
       {/* Main Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 flex flex-col lg:flex-row gap-6">
+      <main className={`flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 flex flex-col lg:flex-row transition-all duration-300 ${isSidebarCollapsed ? 'gap-0' : 'gap-6'}`}>
         
         {/* Left Grid: Workspace Board & Adaptive UI Widgets */}
         <section className="flex-1 flex flex-col gap-6 order-1 lg:order-2">
@@ -680,165 +818,210 @@ export default function App() {
               </div>
 
               {/* Add Task Button (Size based on dynamic configuration) */}
-              <button
-                onClick={() => {
-                  setNewTitle("");
-                  setNewDescription("");
-                  setNewPriority("medium");
-                  setIsModalOpen(true);
-                }}
-                className={`flex items-center justify-center gap-2 font-bold cursor-pointer rounded-xl transition-all shadow-md focus:ring-2 focus:ring-offset-2 ${
-                  uiConfig.buttonSize === "large" 
-                    ? "px-6 py-3.5 bg-emerald-600 text-white hover:bg-emerald-700 text-sm focus:ring-emerald-500" 
-                    : "px-4 py-2 bg-slate-900 text-white hover:bg-slate-800 text-xs focus:ring-slate-700"
-                }`}
-              >
-                <Plus className="w-4 h-4" />
-                <span>+ Створити задачу</span>
-                {uiConfig.showHelperTooltips && (
-                  <span className="hidden sm:inline-block bg-emerald-700 text-[10px] px-1.5 py-0.5 rounded font-mono font-medium animate-pulse ml-1 text-white">
-                    Швидко!
-                  </span>
+              <div className="flex items-center gap-3">
+                {isSidebarCollapsed && (
+                  <button
+                    onClick={() => {
+                      setIsTelemetryCollapsed(false);
+                      setIsChartCollapsed(false);
+                    }}
+                    className="flex items-center justify-center gap-2 px-3 py-2 bg-blue-50 dark:bg-blue-955/30 hover:bg-blue-100 dark:hover:bg-blue-900/20 text-blue-600 dark:text-blue-400 font-bold rounded-xl text-xs border border-blue-200 dark:border-blue-900/30 transition-all cursor-pointer shadow-sm"
+                  >
+                    <Activity className="w-4 h-4 text-blue-500" />
+                    <span>Показати телеметрію</span>
+                  </button>
                 )}
-              </button>
+
+                <button
+                  onClick={() => {
+                    setEditingTaskId(null);
+                    setNewTitle("");
+                    setNewDescription("");
+                    setNewPriority("medium");
+                    setNewStatus(columns[0]?.id || "todo");
+                    setValidationError(null);
+                    setIsModalOpen(true);
+                  }}
+                  className={`flex items-center justify-center gap-2 font-bold cursor-pointer rounded-xl transition-all shadow-md focus:ring-2 focus:ring-offset-2 ${
+                    uiConfig.buttonSize === "large" 
+                      ? "px-6 py-3.5 bg-emerald-600 text-white hover:bg-emerald-700 text-sm focus:ring-emerald-500" 
+                      : "px-4 py-2 bg-slate-900 text-white hover:bg-slate-800 text-xs focus:ring-slate-700"
+                  }`}
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>+ Створити задачу</span>
+                  {uiConfig.showHelperTooltips && (
+                    <span className="hidden sm:inline-block bg-emerald-700 text-[10px] px-1.5 py-0.5 rounded font-mono font-medium animate-pulse ml-1 text-white">
+                      Швидко!
+                    </span>
+                  )}
+                </button>
+              </div>
             </div>
 
              {/* Columns Row */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-              
-              {/* 1. To Do COLUMN */}
-              <div 
-                className="bg-slate-50 dark:bg-slate-800/40 rounded-xl p-4 border border-slate-200/70 dark:border-slate-800"
-                onMouseEnter={handleMouseEnterWidget}
-                onMouseLeave={handleMouseLeaveWidget}
-              >
-                <div className="flex items-center justify-between mb-3.5 pb-2 border-b border-slate-200 dark:border-slate-800">
-                  <span className="inline-flex items-center gap-2 text-xs font-semibold text-slate-600 dark:text-slate-300 font-mono tracking-wider">
-                    <span className="w-2.5 h-2.5 rounded-full bg-slate-400 inline-block" />
-                    TO DO ({todoTasks.length})
-                  </span>
-                  {uiConfig.showHelperTooltips && (
-                    <HelpCircle 
-                      className="w-4 h-4 text-slate-400 dark:text-slate-500 cursor-pointer hover:text-blue-500"
-                      onMouseEnter={() => setActiveTooltip("todo_col")}
-                      onMouseLeave={() => setActiveTooltip(null)}
-                    />
-                  )}
-                </div>
+            <div className="grid gap-5 items-start" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))' }}>
+              {columns.map((col) => {
+                const colTasks = filteredTasks.filter(t => t.status === col.id);
+                
+                let colBg = "bg-slate-50 dark:bg-slate-800/40 border-slate-200/70 dark:border-slate-800";
+                let headerText = "text-slate-600 dark:text-slate-350";
+                let dotBg = "bg-slate-400";
+                let emptyBg = "border-slate-300/60 dark:border-slate-700/50 bg-slate-100/40 dark:bg-slate-900/40 text-slate-450 dark:text-slate-500";
+                let emptyText = "Немає задач";
 
-                {/* Tooltip trigger box */}
-                {activeTooltip === "todo_col" && (
-                  <div className="bg-slate-900 text-white text-[11px] p-2 rounded-lg absolute z-50 max-w-xs -mt-2 shadow-lg">
-                    Задачі, які потрібно зробити. Сюди автоматично потрапляють нові елементи.
-                  </div>
-                )}
+                if (col.id === "todo") {
+                  colBg = "bg-slate-50 dark:bg-slate-800/40 border-slate-200/70 dark:border-slate-800";
+                  headerText = "text-slate-600 dark:text-slate-300";
+                  dotBg = "bg-slate-400";
+                  emptyText = "Немає задач на черзі";
+                } else if (col.id === "inprogress") {
+                  colBg = "bg-blue-50/50 dark:bg-blue-950/20 border-blue-100/70 dark:border-blue-900/30";
+                  headerText = "text-blue-700 dark:text-blue-300";
+                  dotBg = "bg-blue-500 animate-ping";
+                  emptyBg = "border-blue-200/50 dark:border-blue-900/40 bg-blue-50/20 dark:bg-blue-950/10 text-blue-400/85 dark:text-blue-400";
+                  emptyText = "Немає активних задач";
+                } else if (col.id === "done") {
+                  colBg = "bg-emerald-50/40 dark:bg-emerald-950/20 border-emerald-100 dark:border-emerald-900/30";
+                  headerText = "text-emerald-700 dark:text-emerald-300";
+                  dotBg = "bg-emerald-500";
+                  emptyBg = "border-emerald-200/50 dark:border-emerald-900/40 bg-emerald-50/10 dark:bg-emerald-950/10 text-emerald-400/85 dark:text-emerald-400";
+                  emptyText = "Пусто";
+                } else {
+                  colBg = "bg-indigo-50/30 dark:bg-indigo-950/10 border-indigo-100/60 dark:border-indigo-900/20";
+                  headerText = "text-indigo-700 dark:text-indigo-300";
+                  dotBg = "bg-indigo-500";
+                  emptyBg = "border-indigo-200/40 dark:border-indigo-900/30 bg-indigo-50/10 dark:bg-indigo-950/5 text-indigo-400 dark:text-indigo-455";
+                  emptyText = "Тут немає задач";
+                }
 
-                <div className="flex flex-col gap-3 min-h-[220px]">
-                  {todoTasks.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center py-8 text-center border-2 border-dashed border-slate-300/60 dark:border-slate-700/50 rounded-xl bg-slate-100/40 dark:bg-slate-900/40">
-                      <p className="text-xs text-slate-400 dark:text-slate-500">Немає задач на черзі</p>
+                return (
+                  <div 
+                    key={col.id}
+                    className={`${colBg} rounded-xl p-4 border flex flex-col`}
+                    onMouseEnter={handleMouseEnterWidget}
+                    onMouseLeave={handleMouseLeaveWidget}
+                  >
+                    <div className="flex items-center justify-between mb-3.5 pb-2 border-b border-slate-200/80 dark:border-slate-800">
+                      <div className="flex-1 min-w-0 pr-2">
+                        {editingColumnId === col.id ? (
+                          <input
+                            type="text"
+                            value={editingColumnName}
+                            onChange={(e) => setEditingColumnName(e.target.value)}
+                            onBlur={() => saveColumnRename(col.id)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") saveColumnRename(col.id);
+                              if (e.key === "Escape") setEditingColumnId(null);
+                            }}
+                            className="w-full text-xs font-bold text-slate-800 dark:text-white bg-white dark:bg-slate-900 border border-blue-500 rounded px-1.5 py-0.5 focus:outline-hidden"
+                            autoFocus
+                          />
+                        ) : (
+                          <div className="flex items-center gap-1.5 group/col">
+                            <span 
+                              className={`inline-flex items-center gap-2 text-xs font-semibold ${headerText} font-mono tracking-wider truncate cursor-pointer`}
+                              onDoubleClick={() => startEditingColumn(col.id, col.name)}
+                              title="Двічі клацніть, щоб перейменувати"
+                            >
+                              <span className={`w-2.5 h-2.5 rounded-full ${dotBg} inline-block shrink-0`} />
+                              {col.name.toUpperCase()} ({colTasks.length})
+                            </span>
+                            
+                            <div className="opacity-0 group-hover/col:opacity-100 focus-within:opacity-100 flex items-center gap-1 transition-all ml-1 shrink-0">
+                              <button
+                                onClick={() => startEditingColumn(col.id, col.name)}
+                                title="Перейменувати колонку"
+                                className="text-slate-400 hover:text-blue-555 dark:hover:text-blue-400 p-0.5"
+                              >
+                                <Edit className="w-3 h-3" />
+                              </button>
+                              {columns.length > 1 && (
+                                <button
+                                  onClick={() => handleDeleteColumn(col.id)}
+                                  title="Вилучити колонку"
+                                  className="text-slate-400 hover:text-red-500 p-0.5"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                      {uiConfig.showHelperTooltips && (
+                        <HelpCircle 
+                          className="w-4 h-4 text-slate-400 dark:text-slate-500 cursor-pointer hover:text-blue-500 shrink-0"
+                          onMouseEnter={() => setActiveTooltip(col.id)}
+                          onMouseLeave={() => setActiveTooltip(null)}
+                        />
+                      )}
                     </div>
-                  ) : (
-                    todoTasks.map((task) => (
-                      <TaskCard 
-                        key={task.id} 
-                        task={task} 
-                        uiConfig={uiConfig}
-                        onDelete={deleteTask}
-                        onStatusChange={updateTaskStatus}
-                      />
-                    ))
-                  )}
-                </div>
-              </div>
 
-              {/* 2. In Progress COLUMN */}
-              <div 
-                className="bg-blue-50/50 dark:bg-blue-950/20 rounded-xl p-4 border border-blue-100/70 dark:border-blue-900/30"
-                onMouseEnter={handleMouseEnterWidget}
-                onMouseLeave={handleMouseLeaveWidget}
-              >
-                <div className="flex items-center justify-between mb-3.5 pb-2 border-b border-blue-200 dark:border-blue-900/30">
-                  <span className="inline-flex items-center gap-2 text-xs font-semibold text-blue-700 dark:text-blue-300 font-mono tracking-wider">
-                    <span className="w-2.5 h-2.5 rounded-full bg-blue-500 inline-block animate-ping" />
-                    IN PROGRESS ({inProgressTasks.length})
-                  </span>
-                  {uiConfig.showHelperTooltips && (
-                    <HelpCircle 
-                      className="w-4 h-4 text-slate-400 dark:text-slate-500 cursor-pointer hover:text-blue-500"
-                      onMouseEnter={() => setActiveTooltip("progress_col")}
-                      onMouseLeave={() => setActiveTooltip(null)}
-                    />
-                  )}
-                </div>
+                    {activeTooltip === col.id && uiConfig.showHelperTooltips && (
+                      <div className="bg-slate-900 text-white text-[11px] p-2 rounded-lg absolute z-50 max-w-xs -mt-2 shadow-lg">
+                        {col.id === "todo" && "Задачі, які потрібно зробити. Сюди автоматично потрапляють нові елементи."}
+                        {col.id === "inprogress" && "Задачі, які зараз активно виконуються або розробляються в цей момент."}
+                        {col.id === "done" && "Виконані задачі. Оцінка за швидке виконання підсумовується!"}
+                        {col.id !== "todo" && col.id !== "inprogress" && col.id !== "done" && `Користувацька колонка: ${col.name}.`}
+                      </div>
+                    )}
 
-                {activeTooltip === "progress_col" && (
-                  <div className="bg-slate-900 text-white text-[11px] p-2 rounded-lg absolute z-50 max-w-xs -mt-2 shadow-lg">
-                    Задачі, які зараз активно виконуються або розробляються в цей момент.
-                  </div>
-                )}
-
-                <div className="flex flex-col gap-3 min-h-[220px]">
-                  {inProgressTasks.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center py-8 text-center border-2 border-dashed border-blue-200/50 dark:border-blue-900/40 rounded-xl bg-blue-50/20 dark:bg-blue-950/10">
-                      <p className="text-xs text-blue-400/85 dark:text-blue-400">Немає активних задач</p>
+                    <div className="flex flex-col gap-3 min-h-[220px]">
+                      {colTasks.length === 0 ? (
+                        <div className={`flex flex-col items-center justify-center py-8 text-center border-2 border-dashed rounded-xl ${emptyBg}`}>
+                          <p className="text-xs">{emptyText}</p>
+                        </div>
+                      ) : (
+                        colTasks.map((task) => (
+                          <TaskCard 
+                            key={task.id} 
+                            task={task} 
+                            uiConfig={uiConfig}
+                            columns={columns}
+                            onDelete={deleteTask}
+                            onEdit={startEditingTask}
+                            onStatusChange={updateTaskStatus}
+                          />
+                        ))
+                      )}
                     </div>
-                  ) : (
-                    inProgressTasks.map((task) => (
-                      <TaskCard 
-                        key={task.id} 
-                        task={task} 
-                        uiConfig={uiConfig}
-                        onDelete={deleteTask}
-                        onStatusChange={updateTaskStatus}
-                      />
-                    ))
-                  )}
-                </div>
-              </div>
-
-              {/* 3. Done COLUMN */}
-              <div 
-                className="bg-emerald-50/40 dark:bg-emerald-950/20 rounded-xl p-4 border border-emerald-100 dark:border-emerald-900/30"
-                onMouseEnter={handleMouseEnterWidget}
-                onMouseLeave={handleMouseLeaveWidget}
-              >
-                <div className="flex items-center justify-between mb-3.5 pb-2 border-b border-emerald-200 dark:border-emerald-900/30">
-                  <span className="inline-flex items-center gap-2 text-xs font-semibold text-emerald-700 dark:text-emerald-300 font-mono tracking-wider">
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" />
-                    DONE ({doneTasks.length})
-                  </span>
-                  {uiConfig.showHelperTooltips && (
-                    <HelpCircle 
-                      className="w-4 h-4 text-slate-400 dark:text-slate-500 cursor-pointer hover:text-blue-500"
-                      onMouseEnter={() => setActiveTooltip("done_col")}
-                      onMouseLeave={() => setActiveTooltip(null)}
-                    />
-                  )}
-                </div>
-
-                {activeTooltip === "done_col" && (
-                  <div className="bg-slate-900 text-white text-[11px] p-2 rounded-lg absolute z-50 max-w-xs -mt-2 shadow-lg">
-                    Виконані задачі. Оцінка за швидке виконання підсумовується!
                   </div>
-                )}
+                );
+              })}
 
-                <div className="flex flex-col gap-3 min-h-[220px]">
-                  {doneTasks.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center py-8 text-center border-2 border-dashed border-emerald-200/50 dark:border-emerald-900/40 rounded-xl bg-emerald-50/10 dark:bg-emerald-950/10">
-                      <p className="text-xs text-emerald-400/85 dark:text-emerald-400">Пусто</p>
-                    </div>
-                  ) : (
-                    doneTasks.map((task) => (
-                      <TaskCard 
-                        key={task.id} 
-                        task={task} 
-                        uiConfig={uiConfig}
-                        onDelete={deleteTask}
-                        onStatusChange={updateTaskStatus}
-                      />
-                    ))
-                  )}
+              {/* Add Column Card */}
+              <div className="bg-slate-100/50 dark:bg-slate-900/30 rounded-xl p-4 border border-dashed border-slate-350 dark:border-slate-800 flex flex-col justify-center items-center min-h-[200px]">
+                <div className="w-full text-center">
+                  <h3 className="text-xs font-bold text-slate-550 dark:text-slate-400 mb-2 uppercase tracking-wider">
+                    Нова колонка
+                  </h3>
+                  <form 
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      const form = e.currentTarget;
+                      const input = form.elements.namedItem("colName") as HTMLInputElement;
+                      if (input.value.trim()) {
+                        handleAddColumn(input.value.trim());
+                        input.value = "";
+                      }
+                    }}
+                    className="space-y-2"
+                  >
+                    <input
+                      name="colName"
+                      type="text"
+                      placeholder="Назва..."
+                      className="w-full bg-white dark:bg-slate-800 text-xs border border-slate-300 dark:border-slate-700 rounded-lg px-2.5 py-1.5 outline-hidden focus:ring-1 focus:ring-blue-500 focus:border-blue-500 font-sans text-slate-800 dark:text-white"
+                    />
+                    <button
+                      type="submit"
+                      className="w-full py-1.5 bg-slate-900 hover:bg-slate-850 dark:bg-slate-800 dark:hover:bg-slate-700 text-white rounded-lg text-xs font-bold transition-all cursor-pointer inline-flex items-center justify-center gap-1"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      Додати колонку
+                    </button>
+                  </form>
                 </div>
               </div>
 
@@ -893,221 +1076,233 @@ export default function App() {
             </div>
           )}
 
-        </section>
-
-        {/* Right Grid: Behavior Sandbox, AI Analysis, Performance Graphs */}
-        <section 
-          className="w-full lg:w-80 shrink-0 flex flex-col gap-6 order-2 lg:order-1"
-          onMouseEnter={handleMouseEnterWidget}
-          onMouseLeave={handleMouseLeaveWidget}
-        >
-          
-          {/* A. Live Telemetry Monitor (Sandbox Controls) */}
-          <div className="bg-white dark:bg-slate-900 border text-xs border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-sm transition-all duration-300">
-            <div 
-              onClick={() => setIsTelemetryCollapsed(!isTelemetryCollapsed)}
-              className="flex items-center justify-between cursor-pointer select-none pb-1"
-            >
-              <div className="flex items-center gap-1.5">
-                <Activity className="w-4 h-4 text-blue-600 dark:text-blue-450 shrink-0" />
-                <h3 className="font-bold text-slate-900 dark:text-white text-sm uppercase tracking-wider font-sans">
-                  Телеметрія поведінки
-                </h3>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1 bg-slate-50 dark:bg-slate-950/60 border border-slate-105 dark:border-slate-800 px-2 py-0.5 rounded-full text-[10px]">
-                  <span className={`w-1.5 h-1.5 rounded-full ${syncStatus === "syncing" ? "bg-amber-500 animate-ping" : "bg-emerald-500"}`} />
-                  <span className="text-slate-500 dark:text-slate-400 capitalize">{syncStatus}</span>
+        </section>        {/* Right Grid: Behavior Sandbox, AI Analysis, Performance Graphs */}
+        {!isSidebarCollapsed && (
+          <section 
+            className="w-full lg:w-80 shrink-0 flex flex-col gap-6 order-2 lg:order-1"
+            onMouseEnter={handleMouseEnterWidget}
+            onMouseLeave={handleMouseLeaveWidget}
+          >
+            
+            {/* A. Live Telemetry Monitor (Sandbox Controls) */}
+            <div className="bg-white dark:bg-slate-900 border text-xs border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-sm transition-all duration-300">
+              <div 
+                onClick={() => setIsTelemetryCollapsed(!isTelemetryCollapsed)}
+                className="flex items-center justify-between cursor-pointer select-none pb-1"
+              >
+                <div className="flex items-center gap-1.5">
+                  <Activity className="w-4 h-4 text-blue-600 dark:text-blue-450 shrink-0" />
+                  <h3 className="font-bold text-slate-900 dark:text-white text-sm uppercase tracking-wider font-sans">
+                    Телеметрія поведінки
+                  </h3>
                 </div>
-                {isTelemetryCollapsed ? (
-                  <ChevronRight className="w-4 h-4 text-slate-400 hover:text-slate-600 transition-colors" />
-                ) : (
-                  <ChevronDown className="w-4 h-4 text-slate-400 hover:text-slate-600 transition-colors" />
-                )}
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1 bg-slate-50 dark:bg-slate-950/60 border border-slate-100 dark:border-slate-800 px-2 py-0.5 rounded-full text-[10px]">
+                    <span className={`w-1.5 h-1.5 rounded-full ${syncStatus === "syncing" ? "bg-amber-500 animate-ping" : "bg-emerald-500"}`} />
+                    <span className="text-slate-500 dark:text-slate-400 capitalize">{syncStatus}</span>
+                  </div>
+                  {isTelemetryCollapsed ? (
+                    <ChevronRight className="w-4 h-4 text-slate-400 hover:text-slate-600 transition-colors" />
+                  ) : (
+                    <ChevronDown className="w-4 h-4 text-slate-400 hover:text-slate-600 transition-colors" />
+                  )}
+                </div>
               </div>
+
+              {!isTelemetryCollapsed && (
+                <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-800 animate-in fade-in slide-in-from-top-1 duration-200">
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-4 leading-relaxed bg-slate-50 dark:bg-slate-950 p-2.5 rounded-lg border border-slate-200/50 dark:border-slate-800/80">
+                    Ця панель фоново відстежує дії користувача та кожні 12 секунд синхронізує метрики з інтелектуальним бекендом.
+                  </p>
+
+                  {/* Live Metrics Grid */}
+                  <div className="grid grid-cols-2 gap-2 text-xs mb-4">
+                    <div className="p-2.5 bg-rose-50 dark:bg-rose-950/20 border border-rose-100 dark:border-rose-900/30 rounded-xl">
+                      <div className="text-slate-500 dark:text-rose-300/90 text-[10px] uppercase font-bold tracking-wider">Помилки валідації</div>
+                      <div className="text-xl font-mono font-bold text-rose-600 dark:text-rose-400 mt-1 flex items-center justify-between">
+                        {telemetry.errorsCount}
+                        {telemetry.errorsCount > 0 && <AlertCircle className="w-4 h-4 stroke-2" />}
+                      </div>
+                      <div className="text-[9px] text-rose-500 dark:text-rose-450 mt-0.5">Пусті збереження</div>
+                    </div>
+
+                    <div className="p-2.5 bg-amber-50 dark:bg-amber-950/20 border border-amber-100 dark:border-amber-900/30 rounded-xl">
+                      <div className="text-slate-500 dark:text-amber-300/90 text-[10px] uppercase font-bold tracking-wider">Wandering Mouse</div>
+                      <div className="text-xl font-mono font-bold text-amber-700 dark:text-amber-450 mt-1 flex items-center justify-between">
+                        {Math.round(telemetry.hoverTime)}s
+                        <MousePointer className="w-4 h-4 stroke-2" />
+                      </div>
+                      <div className="text-[9px] text-amber-600 dark:text-amber-400/80 mt-0.5">Блукання над кнопками</div>
+                    </div>
+
+                    <div className="p-2.5 bg-sky-50 dark:bg-sky-955/20 border border-sky-100 dark:border-sky-900/30 rounded-xl">
+                      <div className="text-slate-500 dark:text-sky-300/90 text-[10px] uppercase font-bold tracking-wider">Швидкість старту</div>
+                      <div className="text-xl font-mono font-bold text-sky-700 dark:text-sky-450 mt-1">
+                        {telemetry.firstTaskDuration === 0 ? "В очікуванні..." : `${telemetry.firstTaskDuration}s`}
+                      </div>
+                      <div className="text-[9px] text-sky-500 dark:text-sky-400 mt-0.5">Створення 1-ї задачі</div>
+                    </div>
+
+                    <div className="p-2.5 bg-teal-50 dark:bg-teal-955/20 border border-teal-100 dark:border-teal-900/30 rounded-xl">
+                      <div className="text-slate-500 dark:text-teal-300/90 text-[10px] uppercase font-bold tracking-wider">Гарячі клавіші</div>
+                      <div className="text-xl font-mono font-bold text-teal-700 dark:text-teal-450 mt-1 flex items-center justify-between">
+                        {telemetry.shortcutCount}
+                        <Keyboard className="w-4 h-4 stroke-2" />
+                      </div>
+                      <div className="text-[9px] text-teal-600 dark:text-teal-450 mt-0.5">N, S, C або Esc</div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2 mb-4">
+                    <div className="flex justify-between text-[11px] text-slate-500 dark:text-slate-400 font-mono">
+                      <span>Журнал дій: {telemetry.actionsCount}</span>
+                      <span>На екрані: {telemetry.totalTime}с</span>
+                    </div>
+                    <div className="h-1 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                      <div 
+                        className="bg-blue-600 dark:bg-blue-500 h-full transition-all duration-300" 
+                        style={{ width: `${Math.min(100, (telemetry.actionsCount/30)*100)}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Developer/Evaluation Simulator Switchers */}
+                  <div className="border-t border-slate-100 dark:border-slate-800 pt-4">
+                    <span className="text-[11px] font-bold text-slate-900 dark:text-white block mb-2 uppercase tracking-wide font-sans">
+                      Симулятор адаптивності інтерфейсу
+                    </span>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleLevelOverride("Novice")}
+                        className={`py-2 px-1 rounded-lg border text-center transition-all cursor-pointer font-bold font-sans text-xs ${
+                          uiConfig.level === "Novice"
+                            ? "bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-900/60 font-bold shadow-xs"
+                            : "bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700"
+                        }`}
+                      >
+                        Новачок (Novice)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleLevelOverride("Expert")}
+                        className={`py-2 px-1 rounded-lg border text-center transition-all cursor-pointer font-bold font-sans text-xs ${
+                          uiConfig.level === "Expert"
+                            ? "bg-teal-500 dark:bg-teal-600 text-white border-teal-600 dark:border-teal-700 font-bold shadow-xs"
+                            : "bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700"
+                        }`}
+                      >
+                        Експерт (Expert)
+                      </button>
+                    </div>
+
+                    <button
+                      onClick={handleResetMetrics}
+                      className="w-full mt-2 py-1.5 px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-lg text-center transition-all font-mono text-[10px] inline-flex items-center justify-center gap-1 cursor-pointer"
+                    >
+                      <RefreshCw className="w-3 h-3" />
+                      Скинути телеметрію до 0
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
-            {!isTelemetryCollapsed && (
-              <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-800 animate-in fade-in slide-in-from-top-1 duration-200">
-                <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-4 leading-relaxed bg-slate-50 dark:bg-slate-950 p-2.5 rounded-lg border border-slate-200/50 dark:border-slate-800/80">
-                  Ця панель фоново відстежує дії користувача та кожні 12 секунд синхронізує метрики з інтелектуальним бекендом.
+            {/* C. Live Performance Trend Charts (Available for Expert) */}
+            {uiConfig.showDetailedAnalytics ? (
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-sm transition-all duration-300">
+                <div 
+                  onClick={() => setIsChartCollapsed(!isChartCollapsed)}
+                  className="flex items-center justify-between cursor-pointer select-none pb-1 border-b border-slate-100 dark:border-slate-800 mb-3"
+                >
+                  <div className="flex items-center gap-1.5">
+                    <TrendingUp className="w-4 h-4 text-teal-600 dark:text-teal-400 shrink-0" />
+                    <h3 className="font-bold text-slate-900 dark:text-white text-xs uppercase tracking-wider font-sans">
+                      Аналітика навичок (Expert)
+                    </h3>
+                  </div>
+                  {isChartCollapsed ? (
+                    <ChevronRight className="w-4 h-4 text-slate-400 hover:text-slate-600 transition-colors" />
+                  ) : (
+                    <ChevronDown className="w-4 h-4 text-slate-400 hover:text-slate-600 transition-colors" />
+                  )}
+                </div>
+                
+                {!isChartCollapsed && (
+                  <div className="space-y-4 animate-in fade-in slide-in-from-top-1 duration-200">
+                    {/* SVG Live Skill Score Chart */}
+                    <div>
+                      <div className="flex justify-between text-[11px] text-slate-500 dark:text-slate-400 mb-1">
+                        <span>Динаміка оцінки (Score Trend)</span>
+                        <span className="font-bold text-teal-700 dark:text-teal-400">{uiConfig.score}%</span>
+                      </div>
+                      
+                      {metricsHistory.length > 1 ? (
+                        <div className="h-28 bg-slate-55 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg p-2.5 flex items-end justify-between gap-1.5 overflow-hidden">
+                          {metricsHistory.map((pt, idx) => (
+                            <div key={idx} className="flex-1 flex flex-col items-center h-full justify-end group relative">
+                              {/* Tooltip on Hover */}
+                              <div className="absolute bottom-full mb-1 bg-slate-900 text-white font-mono text-[9px] px-1.5 py-0.5 rounded shadow-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none">
+                                {pt.score}% ({pt.time})
+                              </div>
+                              {/* Visual Bar */}
+                              <div 
+                                className="w-full bg-teal-500 group-hover:bg-teal-600 rounded-xs transition-all pointer-events-none"
+                                style={{ height: `${Math.max(4, pt.score)}%` }}
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="h-28 flex items-center justify-center border border-dashed border-slate-200 dark:border-slate-800 rounded-lg bg-slate-50 dark:bg-slate-955 text-[10px] text-slate-400">
+                          Недостатньо історичних точок
+                        </div>
+                      )}
+                      <span className="text-[9px] text-slate-400 dark:text-slate-500 block mt-1.5 text-right font-mono">
+                        Автоматичне оновлення з кожним логом
+                      </span>
+                    </div>
+
+                    {/* Performance stats progress */}
+                    <div className="space-y-2">
+                      <div className="text-[11px] text-slate-600 dark:text-slate-405 font-semibold font-mono">
+                        Оптимальність інтерфейсу:
+                      </div>
+                      <div className="text-xs bg-slate-50 dark:bg-slate-950 p-2.5 rounded-lg border border-slate-100 dark:border-slate-800 space-y-2">
+                        <div className="flex justify-between text-[10px]">
+                          <span className="text-slate-500 dark:text-slate-400">Помилки/Дії</span>
+                          <span className={telemetry.errorsCount > telemetry.actionsCount * 0.2 ? "text-rose-600 dark:text-rose-450 font-bold" : "text-emerald-600 dark:text-emerald-400 font-bold"}>
+                            {telemetry.errorsCount} / {telemetry.actionsCount}
+                          </span>
+                        </div>
+                        <div className="flex justify-between text-[10px]">
+                          <span className="text-slate-500 dark:text-slate-400">Час вагань / дія</span>
+                          <span className="text-slate-800 dark:text-slate-200 font-mono font-medium">
+                            {telemetry.actionsCount > 0 ? `${(telemetry.hoverTime / telemetry.actionsCount).toFixed(1)}с` : "0с"}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                  </div>
+                )}
+              </div>
+            ) : (
+              /* Novice Blocked Chart state with prompt placeholder */
+              <div className="bg-slate-50/75 dark:bg-slate-900/40 border border-dashed border-slate-300 dark:border-slate-800 rounded-xl p-5 text-center flex flex-col items-center justify-center opacity-75">
+                <TrendingUp className="w-8 h-8 text-slate-400/80 dark:text-slate-600 mb-2.5" />
+                <h4 className="text-xs font-bold text-slate-705 dark:text-slate-300">Аналітичний графік заблокований</h4>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 leading-relaxed max-w-xs">
+                  Експертні звіти та графіки приховані для зменшення зорового відволікання та спрощення старту.
                 </p>
-
-                {/* Live Metrics Grid */}
-                <div className="grid grid-cols-2 gap-2 text-xs mb-4">
-                  <div className="p-2.5 bg-rose-50 dark:bg-rose-950/20 border border-rose-100 dark:border-rose-900/30 rounded-xl">
-                    <div className="text-slate-500 dark:text-rose-300/90 text-[10px] uppercase font-bold tracking-wider">Помилки валідації</div>
-                    <div className="text-xl font-mono font-bold text-rose-600 dark:text-rose-400 mt-1 flex items-center justify-between">
-                      {telemetry.errorsCount}
-                      {telemetry.errorsCount > 0 && <AlertCircle className="w-4 h-4 stroke-2" />}
-                    </div>
-                    <div className="text-[9px] text-rose-500 dark:text-rose-450 mt-0.5">Пусті збереження</div>
-                  </div>
-
-                  <div className="p-2.5 bg-amber-50 dark:bg-amber-950/20 border border-amber-100 dark:border-amber-900/30 rounded-xl">
-                    <div className="text-slate-500 dark:text-amber-300/90 text-[10px] uppercase font-bold tracking-wider">Wandering Mouse</div>
-                    <div className="text-xl font-mono font-bold text-amber-700 dark:text-amber-450 mt-1 flex items-center justify-between">
-                      {Math.round(telemetry.hoverTime)}s
-                      <MousePointer className="w-4 h-4 stroke-2" />
-                    </div>
-                    <div className="text-[9px] text-amber-600 dark:text-amber-400/80 mt-0.5">Блукання над кнопками</div>
-                  </div>
-
-                  <div className="p-2.5 bg-sky-50 dark:bg-sky-950/20 border border-sky-100 dark:border-sky-900/30 rounded-xl">
-                    <div className="text-slate-500 dark:text-sky-300/90 text-[10px] uppercase font-bold tracking-wider">Швидкість старту</div>
-                    <div className="text-xl font-mono font-bold text-sky-700 dark:text-sky-450 mt-1">
-                      {telemetry.firstTaskDuration === 0 ? "В очікуванні..." : `${telemetry.firstTaskDuration}s`}
-                    </div>
-                    <div className="text-[9px] text-sky-500 dark:text-sky-400 mt-0.5">Створення 1-ї задачі</div>
-                  </div>
-
-                  <div className="p-2.5 bg-teal-50 dark:bg-teal-950/20 border border-teal-100 dark:border-teal-900/30 rounded-xl">
-                    <div className="text-slate-500 dark:text-teal-300/90 text-[10px] uppercase font-bold tracking-wider">Гарячі клавіші</div>
-                    <div className="text-xl font-mono font-bold text-teal-700 dark:text-teal-450 mt-1 flex items-center justify-between">
-                      {telemetry.shortcutCount}
-                      <Keyboard className="w-4 h-4 stroke-2" />
-                    </div>
-                    <div className="text-[9px] text-teal-600 dark:text-teal-450 mt-0.5">N, S, C або Esc</div>
-                  </div>
-                </div>
-
-                <div className="space-y-2 mb-4">
-                  <div className="flex justify-between text-[11px] text-slate-500 dark:text-slate-400 font-mono">
-                    <span>Журнал дій: {telemetry.actionsCount}</span>
-                    <span>На екрані: {telemetry.totalTime}с</span>
-                  </div>
-                  <div className="h-1 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-                    <div 
-                      className="bg-blue-600 dark:bg-blue-500 h-full transition-all duration-300" 
-                      style={{ width: `${Math.min(100, (telemetry.actionsCount/30)*100)}%` }}
-                    />
-                  </div>
-                </div>
-
-                {/* Developer/Evaluation Simulator Switchers */}
-                <div className="border-t border-slate-100 dark:border-slate-800 pt-4">
-                  <span className="text-[11px] font-bold text-slate-900 dark:text-white block mb-2 uppercase tracking-wide font-sans">
-                    Симулятор адаптивності інтерфейсу
-                  </span>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleLevelOverride("Novice")}
-                      className={`py-2 px-1 rounded-lg border text-center transition-all cursor-pointer font-bold font-sans text-xs ${
-                        uiConfig.level === "Novice"
-                          ? "bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-900/60 font-bold shadow-xs"
-                          : "bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700"
-                      }`}
-                    >
-                      Новачок (Novice)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleLevelOverride("Expert")}
-                      className={`py-2 px-1 rounded-lg border text-center transition-all cursor-pointer font-bold font-sans text-xs ${
-                        uiConfig.level === "Expert"
-                          ? "bg-teal-500 dark:bg-teal-600 text-white border-teal-600 dark:border-teal-700 font-bold shadow-xs"
-                          : "bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700"
-                      }`}
-                    >
-                      Експерт (Expert)
-                    </button>
-                  </div>
-
-                  <button
-                    onClick={handleResetMetrics}
-                    className="w-full mt-2 py-1.5 px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-lg text-center transition-all font-mono text-[10px] inline-flex items-center justify-center gap-1 cursor-pointer"
-                  >
-                    <RefreshCw className="w-3 h-3" />
-                    Скинути телеметрію до 0
-                  </button>
+                <div className="mt-4 text-[10px] bg-sky-50 dark:bg-sky-955/30 text-sky-700 dark:text-sky-300 px-2.5 py-1 rounded-full font-semibold">
+                  Підніміть Score &gt; 50 для активації
                 </div>
               </div>
             )}
-          </div>
 
-
-
-          {/* C. Live Performance Trend Charts (Available for Expert) */}
-          {uiConfig.showDetailedAnalytics ? (
-            <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm transition-all duration-300">
-              <h3 className="font-bold text-slate-900 flex items-center gap-2 text-xs uppercase tracking-wider mb-3 pb-2 border-b border-slate-100">
-                <TrendingUp className="w-4 h-4 text-teal-600" />
-                Аналітика навичок (Expert)
-              </h3>
-              
-              <div className="space-y-4">
-                {/* SVG Live Skill Score Chart */}
-                <div>
-                  <div className="flex justify-between text-[11px] text-slate-500 mb-1">
-                    <span>Динаміка оцінки (Score Trend)</span>
-                    <span className="font-bold text-teal-700">{uiConfig.score}%</span>
-                  </div>
-                  
-                  {metricsHistory.length > 1 ? (
-                    <div className="h-28 bg-slate-50 border border-slate-200 rounded-lg p-2.5 flex items-end justify-between gap-1.5 overflow-hidden">
-                      {metricsHistory.map((pt, idx) => (
-                        <div key={idx} className="flex-1 flex flex-col items-center h-full justify-end group relative">
-                          {/* Tooltip on Hover */}
-                          <div className="absolute bottom-full mb-1 bg-slate-900 text-white font-mono text-[9px] px-1.5 py-0.5 rounded shadow-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none">
-                            {pt.score}% ({pt.time})
-                          </div>
-                          {/* Visual Bar */}
-                          <div 
-                            className="w-full bg-teal-500 group-hover:bg-teal-600 rounded-xs transition-all pointer-events-none"
-                            style={{ height: `${Math.max(4, pt.score)}%` }}
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="h-28 flex items-center justify-center border border-dashed border-slate-200 rounded-lg bg-slate-50 text-[10px] text-slate-400">
-                      Недостатньо історичних точок
-                    </div>
-                  )}
-                  <span className="text-[9px] text-slate-400 block mt-1.5 text-right font-mono">
-                    Автоматичне оновлення з кожним логом
-                  </span>
-                </div>
-
-                {/* Performance stats progress */}
-                <div className="space-y-2">
-                  <div className="text-[11px] text-slate-600 font-semibold font-mono">
-                    Оптимальність інтерфейсу:
-                  </div>
-                  <div className="text-xs bg-slate-50 p-2.5 rounded-lg border border-slate-100 space-y-2">
-                    <div className="flex justify-between text-[10px]">
-                      <span className="text-slate-500">Помилки/Дії</span>
-                      <span className={telemetry.errorsCount > telemetry.actionsCount * 0.2 ? "text-rose-600 font-bold" : "text-emerald-600 font-bold"}>
-                        {telemetry.errorsCount} / {telemetry.actionsCount}
-                      </span>
-                    </div>
-                    <div className="flex justify-between text-[10px]">
-                      <span className="text-slate-500">Час вагань / дія</span>
-                      <span className="text-slate-800 font-mono font-medium">
-                        {telemetry.actionsCount > 0 ? `${(telemetry.hoverTime / telemetry.actionsCount).toFixed(1)}с` : "0с"}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-              </div>
-            </div>
-          ) : (
-            /* Novice Blocked Chart state with prompt placeholder */
-            <div className="bg-slate-50/75 border border-dashed border-slate-300 rounded-xl p-5 text-center flex flex-col items-center justify-center opacity-75">
-              <TrendingUp className="w-8 h-8 text-slate-400/80 mb-2.5" />
-              <h4 className="text-xs font-bold text-slate-700">Аналітичний графік заблокований</h4>
-              <p className="text-[11px] text-slate-500 mt-1 leading-relaxed max-w-xs">
-                Експертні звіти та графіки приховані для зменшення зорового відволікання та спрощення старту.
-              </p>
-              <div className="mt-4 text-[10px] bg-sky-50 text-sky-700 px-2.5 py-1 rounded-full font-semibold">
-                Підніміть Score &gt; 50 для активації
-              </div>
-            </div>
-          )}
-
-        </section>
+          </section>
+        )}
 
       </main>
 
@@ -1131,9 +1326,11 @@ export default function App() {
             {/* Modal Header */}
             <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/80 dark:bg-slate-950/80">
               <div>
-                <h3 className="text-base font-bold text-slate-900 dark:text-white">Створити нову задачу</h3>
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                  {editingTaskId ? "Редагувати задачу" : "Створити нову задачу"}
+                </h3>
                 <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                  Додайте задачу до планового списку.
+                  {editingTaskId ? "Змініть параметри та збережіть зміни." : "Додайте задачу до планового списку."}
                 </p>
               </div>
               <button
@@ -1168,7 +1365,7 @@ export default function App() {
                     setNewTitle(e.target.value);
                     if (validationError) setValidationError(null);
                   }}
-                  className="w-full bg-slate-50 dark:bg-slate-800 focus:bg-white dark:focus:bg-slate-950 text-xs border border-slate-300 dark:border-slate-700 rounded-xl px-3.5 py-2.5 outline-hidden focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all font-sans text-slate-900 dark:text-white font-semibold"
+                  className="w-full bg-slate-50 dark:bg-slate-800 focus:bg-white dark:focus:bg-slate-955 text-xs border border-slate-300 dark:border-slate-700 rounded-xl px-3.5 py-2.5 outline-hidden focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all font-sans text-slate-900 dark:text-white font-semibold"
                 />
                 {uiConfig.showHelperTooltips && (
                   <p className="text-[10px] text-blue-600 dark:text-blue-400 mt-1 font-medium flex items-center gap-1">
@@ -1188,7 +1385,7 @@ export default function App() {
                   rows={3}
                   value={newDescription}
                   onChange={(e) => setNewDescription(e.target.value)}
-                  className="w-full bg-slate-50 dark:bg-slate-800 focus:bg-white dark:focus:bg-slate-950 text-xs border border-slate-300 dark:border-slate-700 rounded-xl px-3.5 py-2.5 outline-hidden focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all font-sans text-slate-850 dark:text-slate-200"
+                  className="w-full bg-slate-50 dark:bg-slate-800 focus:bg-white dark:focus:bg-slate-955 text-xs border border-slate-300 dark:border-slate-700 rounded-xl px-3.5 py-2.5 outline-hidden focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all font-sans text-slate-850 dark:text-slate-200"
                 />
               </div>
 
@@ -1198,16 +1395,16 @@ export default function App() {
                 {/* Status selector */}
                 <div>
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5 uppercase tracking-wide">
-                    Поточний статус
+                    Поточний status
                   </label>
                   <select
                     value={newStatus}
                     onChange={(e: any) => setNewStatus(e.target.value)}
-                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-xs focus:ring-2 focus:ring-blue-500 outline-hidden tracking-wide font-medium text-slate-700 dark:text-slate-200"
+                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-xs focus:ring-2 focus:ring-blue-500 outline-hidden tracking-wide font-medium text-slate-700 dark:text-slate-200 cursor-pointer"
                   >
-                    <option value="todo">To Do</option>
-                    <option value="inprogress">In Progress</option>
-                    <option value="done">Done</option>
+                    {columns.map(col => (
+                      <option key={col.id} value={col.id}>{col.name}</option>
+                    ))}
                   </select>
                 </div>
 
@@ -1219,7 +1416,7 @@ export default function App() {
                   <select
                     value={newPriority}
                     onChange={(e: any) => setNewPriority(e.target.value)}
-                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-xs focus:ring-2 focus:ring-blue-500 outline-hidden tracking-wide font-medium text-slate-700 dark:text-slate-200"
+                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-xs focus:ring-2 focus:ring-blue-500 outline-hidden tracking-wide font-medium text-slate-700 dark:text-slate-200 cursor-pointer"
                   >
                     <option value="low">Низький (Low)</option>
                     <option value="medium">Середній (Medium)</option>
@@ -1243,7 +1440,7 @@ export default function App() {
                   className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-bold rounded-xl text-xs transition-all cursor-pointer shadow-md shadow-blue-500/10 inline-flex items-center gap-1.5"
                 >
                   <Check className="w-4 h-4" />
-                  <span>Створити</span>
+                  <span>{editingTaskId ? "Зберегти" : "Створити"}</span>
                 </button>
               </div>
 
@@ -1262,108 +1459,111 @@ interface TaskCardProps {
   key?: string;
   task: Task;
   uiConfig: UIConfig;
+  columns: { id: string; name: string }[];
   onDelete: (id: string) => any;
-  onStatusChange: (id: string, status: "todo" | "inprogress" | "done") => any;
+  onEdit: (task: Task) => any;
+  onStatusChange: (id: string, status: string) => any;
 }
 
-function TaskCard({ task, uiConfig, onDelete, onStatusChange }: TaskCardProps) {
+function TaskCard({ task, uiConfig, columns, onDelete, onEdit, onStatusChange }: TaskCardProps) {
   const [showTooltip, setShowTooltip] = useState(false);
 
   // Helper colors for priorities
   const priorityStyles = {
-    high: "bg-red-50 text-red-700 border-red-200",
-    medium: "bg-amber-50 text-amber-700 border-amber-200",
-    low: "bg-slate-100 text-slate-700 border-slate-300"
+    high: "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/20 dark:text-red-400 dark:border-red-900/30",
+    medium: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/20 dark:text-amber-400 dark:border-amber-900/30",
+    low: "bg-slate-100 text-slate-700 border-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700"
   };
 
   return (
     <div 
-      className="bg-white border border-slate-200 hover:border-blue-300 rounded-xl p-3.5 shadow-sm hover:shadow-md transition-all duration-200 relative group overflow-hidden"
+      className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-850 hover:border-blue-300 dark:hover:border-blue-750 rounded-xl p-3.5 shadow-sm hover:shadow-md transition-all duration-200 relative group overflow-hidden"
     >
       {/* Priority label tag */}
       <div className="flex justify-between items-center gap-2 mb-2">
         <span className={`text-[9px] font-mono font-bold tracking-wider uppercase px-2 py-0.5 rounded border ${priorityStyles[task.priority]}`}>
           {task.priority}
         </span>
-        <button
-          onClick={() => onDelete(task.id)}
-          className="text-slate-400 hover:text-red-500 p-1 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-all cursor-pointer"
-        >
-          <Trash2 className="w-3.5 h-3.5" />
-        </button>
+        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-all">
+          <button
+            onClick={() => onEdit(task)}
+            title="Редагувати задачу"
+            className="text-slate-400 hover:text-blue-500 dark:hover:text-blue-400 p-1 cursor-pointer"
+          >
+            <Edit className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={() => onDelete(task.id)}
+            title="Вилучити задачу"
+            className="text-slate-400 hover:text-red-500 p-1 cursor-pointer"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        </div>
       </div>
 
-      <h4 className="text-xs font-bold text-slate-800 font-sans line-clamp-1">
+      <h4 className="text-xs font-bold text-slate-800 dark:text-slate-100 font-sans line-clamp-1">
         {task.title}
       </h4>
 
       {task.description && (
-        <p className="text-[11px] text-slate-500 mt-1 line-clamp-2 leading-relaxed">
+        <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 line-clamp-2 leading-relaxed">
           {task.description}
         </p>
       )}
 
       {/* Task Creation Date */}
-      <div className="text-[9px] text-slate-400/80 font-mono mt-3">
+      <div className="text-[9px] text-slate-400/80 dark:text-slate-500/80 font-mono mt-3">
         Додано: {new Date(task.createdAt).toLocaleTimeString()}
       </div>
 
       {/* Adaptive quick actions layout inside card */}
-      <div className="mt-3.5 pt-2 border-t border-slate-100/70 flex items-center justify-between gap-2">
+      <div className="mt-3.5 pt-2 border-t border-slate-100/70 dark:border-slate-800 flex items-center justify-between gap-2">
         
         {/* Simple visual helpers info for Novices */}
         {uiConfig.showSimpleView ? (
           <div className="flex flex-wrap gap-1.5 w-full justify-between items-center">
-            {task.status !== "todo" && (
-              <button
-                type="button"
-                onClick={() => onStatusChange(task.id, "todo")}
-                className="bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg px-2 py-1 text-[10px] cursor-pointer font-bold inline-flex items-center gap-1 transition-all"
-                onMouseEnter={() => setShowTooltip(true)}
-                onMouseLeave={() => setShowTooltip(false)}
-              >
-                ← Черга
-              </button>
-            )}
-            {task.status !== "inprogress" && (
-              <button
-                type="button"
-                onClick={() => onStatusChange(task.id, "inprogress")}
-                className="bg-sky-100 hover:bg-sky-200 text-sky-700 rounded-lg px-2 py-1 text-[10px] cursor-pointer font-bold inline-flex items-center gap-1 transition-all"
-                onMouseEnter={() => setShowTooltip(true)}
-                onMouseLeave={() => setShowTooltip(false)}
-              >
-                Робота ⚡
-              </button>
-            )}
-            {task.status !== "done" && (
-              <button
-                type="button"
-                onClick={() => onStatusChange(task.id, "done")}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg px-2 py-1 text-[10px] cursor-pointer font-bold inline-flex items-center gap-1 transition-all shrink-0"
-                onMouseEnter={() => setShowTooltip(true)}
-                onMouseLeave={() => setShowTooltip(false)}
-              >
-                Виконати! ✓
-              </button>
-            )}
+            {columns.map(col => {
+              if (task.status === col.id) return null;
+              
+              let btnClass = "bg-slate-100 hover:bg-slate-200 text-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-300";
+              if (col.id === "inprogress") btnClass = "bg-sky-100 hover:bg-sky-200 text-sky-700 dark:bg-sky-955/40 dark:text-sky-300";
+              if (col.id === "done") btnClass = "bg-emerald-600 hover:bg-emerald-700 text-white dark:bg-emerald-700 dark:hover:bg-emerald-600";
+              
+              if (col.id !== "todo" && col.id !== "inprogress" && col.id !== "done") {
+                btnClass = "bg-indigo-50/60 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300";
+              }
+              
+              return (
+                <button
+                  key={col.id}
+                  type="button"
+                  onClick={() => onStatusChange(task.id, col.id)}
+                  className={`${btnClass} rounded-lg px-2 py-1 text-[10px] cursor-pointer font-bold inline-flex items-center gap-1 transition-all`}
+                  onMouseEnter={() => setShowTooltip(true)}
+                  onMouseLeave={() => setShowTooltip(false)}
+                >
+                  {col.name}
+                </button>
+              );
+            })}
           </div>
         ) : (
           /* High-density layout for experts */
           <div className="flex items-center justify-between w-full">
-            <span className="text-[10px] text-slate-400 capitalize font-medium italic">
-              Status: <strong className="text-slate-600">{task.status}</strong>
+            <span className="text-[10px] text-slate-400 dark:text-slate-500 capitalize font-medium italic">
+              Status: <strong className="text-slate-600 dark:text-slate-300">{columns.find(c => c.id === task.status)?.name || task.status}</strong>
             </span>
             <div className="flex items-center gap-1">
-              <span className="text-[9px] text-slate-500 mr-1">Перемістити:</span>
+              <span className="text-[9px] text-slate-500 dark:text-slate-400 mr-1">Перемістити:</span>
               <select
                 value={task.status}
                 onChange={(e: any) => onStatusChange(task.id, e.target.value)}
-                className="bg-slate-100 border border-slate-200 py-0.5 px-1.5 rounded text-[10px] focus:ring-1 focus:ring-teal-500 outline-hidden font-bold"
+                className="bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 py-0.5 px-1.5 rounded text-[10px] focus:ring-1 focus:ring-teal-500 outline-hidden font-bold cursor-pointer"
               >
-                <option value="todo">To Do</option>
-                <option value="inprogress">In Progress</option>
-                <option value="done">Done</option>
+                {columns.map(col => (
+                  <option key={col.id} value={col.id}>{col.name}</option>
+                ))}
               </select>
             </div>
           </div>
@@ -1372,7 +1572,7 @@ function TaskCard({ task, uiConfig, onDelete, onStatusChange }: TaskCardProps) {
       </div>
 
       {showTooltip && uiConfig.showHelperTooltips && (
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-slate-900 text-white text-[10px] p-2 rounded shadow-xl max-w-[140px] text-center font-sans">
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-slate-900 text-white text-[10px] p-2 rounded shadow-xl max-w-[140px] text-center font-sans z-50">
           Змінює поточний статус цієї задачі в колонках
         </div>
       )}
